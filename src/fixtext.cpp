@@ -61,6 +61,16 @@ static bool isTextWhitespaceControl(uint8_t b)
     return (b == '\t') || (b == '\n') || (b == '\r');
 }
 
+static bool isAsciiAlnum(uint8_t b)
+{
+    return ((b >= '0') && (b <= '9')) || ((b >= 'A') && (b <= 'Z')) || ((b >= 'a') && (b <= 'z'));
+}
+
+static bool isNotAsciiAlnum(uint8_t b)
+{
+    return !isAsciiAlnum(b);
+}
+
 static std::string utf8Encode(uint32_t cp)
 {
     std::string out;
@@ -518,6 +528,52 @@ static std::string fixLatin1GermanUmlauts(const std::vector<uint8_t>& bytes, siz
     return out;
 }
 
+static std::string fixFuerReplacement(const std::string& text, size_t* convertedOut = nullptr)
+{
+    static const std::string replacement = utf8Encode(0xfffd);
+    std::string out;
+    out.reserve(text.size());
+    size_t converted = 0;
+    for (size_t i = 0; i < text.size();)
+    {
+        const auto b = static_cast<uint8_t>(text[i]);
+        if ((i + 3 + replacement.size() < text.size()) &&
+            isNotAsciiAlnum(b) &&
+            ((text[i + 1] == 'f') || (text[i + 1] == 'F')) &&
+            (text.compare(i + 2, replacement.size(), replacement) == 0) &&
+            ((text[i + 2 + replacement.size()] == 'r') || (text[i + 2 + replacement.size()] == 'R')) &&
+            isNotAsciiAlnum(static_cast<uint8_t>(text[i + 3 + replacement.size()])))
+        {
+            out += text[i];
+            if ((text[i + 1] == 'F') && (text[i + 2 + replacement.size()] == 'R'))
+            {
+                out += "FÜR";
+            }
+            else if (text[i + 1] == 'F')
+            {
+                out += "Für";
+            }
+            else
+            {
+                out += "für";
+            }
+            out += text[i + 3 + replacement.size()];
+            i += 4 + replacement.size();
+            converted++;
+        }
+        else
+        {
+            out += text[i];
+            i++;
+        }
+    }
+    if (convertedOut)
+    {
+        *convertedOut = converted;
+    }
+    return out;
+}
+
 UNIT_TEST(utf8Decode)
 {
     std::vector<uint8_t> bytes{'a', 0xc3, 0xa4, 0xe2, 0x82, 0xac};
@@ -534,6 +590,30 @@ UNIT_TEST(fixLatin1GermanUmlauts)
     const std::string fixed = fixLatin1GermanUmlauts(bytes, &converted);
     ASSERT_EQ(converted, size_t(2));
     ASSERT_EQ(fixed, std::string("Mäxöß"));
+}
+
+UNIT_TEST(fixFuerReplacement)
+{
+    const std::string replacement = utf8Encode(0xfffd);
+    size_t converted = 0;
+    ASSERT_EQ(fixFuerReplacement(" f" + replacement + "r ", &converted), " für ");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement("\tF" + replacement + "r\n", &converted), "\tFür\n");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement(" F" + replacement + "R ", &converted), " FÜR ");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement("x f" + replacement + "r y", &converted), "x für y");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement("no:f" + replacement + "r\n", &converted), "no:für\n");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement("(f" + replacement + "r)", &converted), "(für)");
+    ASSERT_EQ(converted, size_t(1));
+    ASSERT_EQ(fixFuerReplacement("f" + replacement + "r", &converted), "f" + replacement + "r");
+    ASSERT_EQ(converted, size_t(0));
+    ASSERT_EQ(fixFuerReplacement("xf" + replacement + "r ", &converted), "xf" + replacement + "r ");
+    ASSERT_EQ(converted, size_t(0));
+    ASSERT_EQ(fixFuerReplacement(" f" + replacement + "ry", &converted), " f" + replacement + "ry");
+    ASSERT_EQ(converted, size_t(0));
 }
 
 UNIT_TEST(binaryHeuristic)
@@ -689,7 +769,7 @@ static void analyzeFile(const fs::path& path, unsigned analysisLevel)
     printCharHistogram(a, analysisLevel - 1);
 }
 
-static bool fixFile(const fs::path& path)
+static bool fixFile(const fs::path& path, bool fixLatin1, bool fixFuer, bool dryRun)
 {
     const std::vector<uint8_t> bytes = readFile(path);
     const FileAnalysis a = analyzeBytes(bytes);
@@ -697,14 +777,40 @@ static bool fixFile(const fs::path& path)
     {
         return false;
     }
-    size_t converted = 0;
-    const std::string fixed = fixLatin1GermanUmlauts(bytes, &converted);
+    size_t latin1Converted = 0;
+    size_t fuerConverted = 0;
+    std::string fixed(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (fixLatin1)
+    {
+        fixed = fixLatin1GermanUmlauts(std::vector<uint8_t>(fixed.begin(), fixed.end()), &latin1Converted);
+    }
+    if (fixFuer)
+    {
+        fixed = fixFuerReplacement(fixed, &fuerConverted);
+    }
+    const size_t converted = latin1Converted + fuerConverted;
     if (converted == 0)
     {
         return false;
     }
-    writeFile(path, fixed);
-    std::cout << path.string() << ": converted " << converted << " German Latin1 byte" << (converted == 1 ? "" : "s") << " to UTF-8\n";
+    if (!dryRun)
+    {
+        writeFile(path, fixed);
+    }
+    std::cout << path.string() << ":";
+    if (dryRun)
+    {
+        std::cout << " would";
+    }
+    if (latin1Converted)
+    {
+        std::cout << " convert " << latin1Converted << " German Latin1 byte" << (latin1Converted == 1 ? "" : "s") << " to UTF-8";
+    }
+    if (fuerConverted)
+    {
+        std::cout << (latin1Converted ? "," : "") << (dryRun ? " replace " : " replaced ") << fuerConverted << " damaged fuer sequence" << (fuerConverted == 1 ? "" : "s");
+    }
+    std::cout << "\n";
     return true;
 }
 
@@ -778,8 +884,10 @@ static int realMain(int argc, char* argv[])
         "0.1");
     cl.addHeader("\nOptions:\n");
     cl.addOption('a', "analyze", "Analyze files. -a prints one grep-friendly summary line per file, -aa prints compact details, -aaa prints detailed nonzero char rows, -aaaa also includes zero-count ASCII/Latin1 rows.");
+    cl.addOption('d', "dry-run", "Show what would be fixed without writing files.");
     cl.addOption('r', "recursive", "Recurse into directories. .git directories are ignored.");
     cl.addOption(' ', "fix-latin1", "Convert German Latin1 umlaut bytes (ÄÖÜäöüß) to UTF-8 while preserving already valid UTF-8.");
+    cl.addOption(' ', "fix-fuer", "Replace non-alnum-delimited f/F + U+FFFD + r/R with für/Für/FÜR, preserving surrounding boundary bytes.");
     cl.addOption('v', "verbose", "Reserved for future verbose output. Does not change analysis detail; use repeated -a instead.");
     cl.parse(argc, argv);
 
@@ -787,7 +895,8 @@ static int realMain(int argc, char* argv[])
     {
         cl.error("No files or directories specified.");
     }
-    const bool analyze = cl.isSet("analyze") || !cl.isSet("fix-latin1");
+    const bool anyFix = cl.isSet("fix-latin1") || cl.isSet("fix-fuer");
+    const bool analyze = cl.isSet("analyze") || !anyFix;
     const unsigned analysisLevel = cl.isSet("analyze") ? std::min(cl.getCount("analyze") - 1, 3U) : 0U;
     const std::vector<fs::path> files = collectFiles(cl.getArgs(), cl.isSet("recursive"));
     if (files.empty())
@@ -802,14 +911,14 @@ static int realMain(int argc, char* argv[])
         {
             analyzeFile(file, analysisLevel);
         }
-        if (cl.isSet("fix-latin1"))
+        if (anyFix)
         {
-            changed += fixFile(file) ? 1 : 0;
+            changed += fixFile(file, cl.isSet("fix-latin1"), cl.isSet("fix-fuer"), cl.isSet("dry-run")) ? 1 : 0;
         }
     }
-    if (cl.isSet("fix-latin1"))
+    if (anyFix)
     {
-        std::cout << "Changed " << changed << " file" << (changed == 1 ? "" : "s") << ".\n";
+        std::cout << (cl.isSet("dry-run") ? "Would change " : "Changed ") << changed << " file" << (changed == 1 ? "" : "s") << ".\n";
     }
     return 0;
 }
