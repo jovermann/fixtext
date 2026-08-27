@@ -71,6 +71,13 @@ static bool isNotAsciiAlnum(uint8_t b)
     return !isAsciiAlnum(b);
 }
 
+static std::string hexByte(uint8_t byte)
+{
+    std::ostringstream os;
+    os << "0x" << std::hex << std::setw(2) << std::setfill('0') << unsigned(byte);
+    return os.str();
+}
+
 static std::string utf8Encode(uint32_t cp)
 {
     std::string out;
@@ -693,7 +700,7 @@ static void printCharHistogram(const FileAnalysis& a, unsigned verbosity)
         {
             continue;
         }
-        printCharHistogramRow(b < 0x80 ? "ASCII" : "Latin1", ut1::hexByte(b), count, ut1::hexByte(b), latin1CharName(b), singleByteMeaning(b));
+        printCharHistogramRow(b < 0x80 ? "ASCII" : "Latin1", hexByte(b), count, hexByte(b), latin1CharName(b), singleByteMeaning(b));
     }
 
     for (const auto& kv: a.utf8CharHist)
@@ -739,7 +746,7 @@ static void printRawByteHistogram(const FileAnalysis& a, bool showZeros)
             continue;
         }
         const uint8_t b = static_cast<uint8_t>(i);
-        std::cout << "    " << cellLeft(ut1::hexByte(b), 8) << std::right << std::setw(8) << std::dec << i
+        std::cout << "    " << cellLeft(hexByte(b), 8) << std::right << std::setw(8) << std::dec << i
                   << std::setw(10) << a.hist[i] << "  " << cellLeft(latin1CharName(b), 14) << byteUtf8Meaning(b) << "\n";
     }
 }

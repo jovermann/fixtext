@@ -1,18 +1,21 @@
 // Unit test framework.
 //
-// Copyright (c) 2021-2026 Johannes Overmann
+// Copyright (c) 2021 Johannes Overmann
 //
 // Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at https://www.boost.org/LICENSE_1_0.txt)
 
-#pragma once
+#ifndef include_UnitTest_hpp
+#define include_UnitTest_hpp
 
+#include <string>
+#include <map>
 #include <cassert>
 #include <iostream>
-#include <map>
-#include <string>
 
 #ifdef ENABLE_UNIT_TEST
 
+// Always enable asserts() when running unit tests.
 #undef NDEBUG
 
 struct UnitTest;
@@ -20,7 +23,11 @@ struct UnitTest;
 class UnitTestRegistry
 {
 public:
+    /// Register test in global test registry.
+    /// This is implicitly called by UNITS_TEST().
     static void registerTest(UnitTest* test);
+
+    /// Run all tests.
     static int runTests();
 
 private:
@@ -29,13 +36,22 @@ private:
 
 struct UnitTest
 {
-    UnitTest(const std::string& testName_, const std::string& testFile_, int testLine_);
+    UnitTest(const std::string& testName_, const std::string& testFile_, int testLine_)
+    : testName(testName_)
+    , testFile(testFile_)
+    , testLine(testLine_)
+    {
+        UnitTestRegistry::registerTest(this);
+    }
+
     virtual ~UnitTest();
+
     virtual void run() = 0;
-    std::string getTestName() const { return testFile + ":" + testName; }
+    std::string  getTestName() const { return testFile + ":" + testName; }
+
     std::string testName;
     std::string testFile;
-    int testLine{};
+    int         testLine{};
 };
 
 void UNIT_TEST_RUN();
@@ -83,3 +99,5 @@ void UNIT_TEST_RUN();
    assert((a) != (b));                                                                  \
   }                                                                                     \
  }
+
+#endif /* include_UnitTest_hpp */
