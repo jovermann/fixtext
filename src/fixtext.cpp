@@ -883,11 +883,12 @@ static int realMain(int argc, char* argv[])
     ut1::CommandLineParser cl(
         "fixtext",
         "Usage: $programName [options] FILE_OR_DIR...\n"
-        "Analyze plain text byte encodings and optionally convert German Latin1 umlaut bytes to UTF-8.",
+        "Analyze plain text byte encodings and optionally convert German Latin1 umlaut bytes to UTF-8.\n"
         "\nExamples:\n"
         "  $programName -a notes.txt\n"
         "  $programName -r -a src\n"
         "  $programName -r --fix-latin1 .\n",
+        "\n$programName version $version ($compileDate) *** Copyright (c) 2026 Johannes Overmann *** https://github.com/jovermann/fixtext",
         "0.1");
     cl.addHeader("\nOptions:\n");
     cl.addOption('a', "analyze", "Analyze files. -a prints one grep-friendly summary line per file, -aa prints compact details, -aaa prints detailed nonzero char rows, -aaaa also includes zero-count ASCII/Latin1 rows.");
